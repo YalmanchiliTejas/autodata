@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autodata — Flowchart</title>
+<style>
+  :root{--bg:#0f1115;--ink:#e7e9ee;--muted:#9aa3b2;--line:#3a4152;
+    --proc:#1e2230;--proc-b:#3a4a66;--dec:#2a2333;--dec-b:#6a4b8a;
+    --start:#15302a;--start-b:#2f7d5f;--stop:#331c1e;--stop-b:#8a4144;
+    --accept:#153025;--accept-b:#2f9d6b;--edge:#8892a4;--fb:#f2b661;}
+  @media (prefers-color-scheme: light){
+    :root{--bg:#f6f7f9;--ink:#1b1e24;--muted:#5b6472;--line:#c9d1dd;
+      --proc:#eef2f9;--proc-b:#9fb6dd;--dec:#f2ecf8;--dec-b:#b48fd8;
+      --start:#e4f5ec;--start-b:#3aa877;--stop:#fbe7e8;--stop-b:#d5787b;
+      --accept:#e2f5ea;--accept-b:#2f9d6b;--edge:#6b7484;--fb:#c98410;}}
+  body{margin:0;background:var(--bg);color:var(--ink);padding:24px;
+    font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  h1{font-size:22px;margin:0 0 2px}
+  p.sub{color:var(--muted);margin:0 0 16px}
+  .scroll{overflow-x:auto}
+  svg{max-width:100%;height:auto;display:block;margin:0 auto;min-width:640px}
+  text{fill:var(--ink);font:13px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  .lab{fill:var(--muted);font-size:11.5px}
+  .edgelab{fill:var(--muted);font-size:11px}
+  .yes{fill:var(--accept-b);font-size:11.5px;font-weight:600}
+  .no{fill:var(--stop-b);font-size:11.5px;font-weight:600}
+  .mono{font-family:ui-monospace,Menlo,monospace;font-size:10.5px;fill:var(--muted)}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin-top:14px}
+  .sw{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px;border:1px solid var(--line)}
+</style>
+</head>
+<body>
+<h1>Autodata — Acceptance Loop Flowchart</h1>
+<p class="sub">One pass per source document. Both rejection paths return to the budget check, which starts a new round or stops.</p>
+<div class="scroll">
+<svg viewBox="0 0 820 900" role="img" aria-label="Autodata acceptance loop flowchart">
+  <defs>
+    <marker id="arw" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="var(--edge)"/>
+    </marker>
+    <marker id="arwfb" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="var(--fb)"/>
+    </marker>
+  </defs>
+
+  <!-- ============ EDGES (drawn first, under nodes) ============ -->
+  <!-- start -> budget -->
+  <line x1="410" y1="74" x2="410" y2="96" stroke="var(--edge)" stroke-width="2" marker-end="url(#arw)"/>
+  <!-- budget yes -> challenger -->
+  <line x1="410" y1="184" x2="410" y2="212" stroke="var(--edge)" stroke-width="2" marker-end="url(#arw)"/>
+  <text class="yes" x="418" y="202">yes · round++</text>
+  <!-- budget no -> stop -->
+  <line x1="500" y1="140" x2="612" y2="140" stroke="var(--edge)" stroke-width="2" marker-end="url(#arw)"/>
+  <text class="no" x="516" y="132">no</text>
+  <!-- challenger -> verifier -->
+  <line x1="410" y1="266" x2="410" y2="300" stroke="var(--edge)" stroke-width="2" marker-end="url(#arw)"/>
+  <!-- verifier yes -> solvers -->
+  <line x1="410" y1="384" x2="410" y2="416" stroke="var(--edge)" stroke-width="2" marker-end="url(#arw)"/>
+  <text class="yes" x="418" y="406">pass</text>
+  <!-- solvers -> judge -->
+  <line x1="410" y1="470" x2="410" y2="500" stroke="var(--edge)" stroke-width="2" marker-end="url(#arw)"/>
+  <!-- judge -> accept -->
+  <line x1="410" y1="554" x2="410" y2="584" stroke="var(--edge)" stroke-width="2" marker-end="url(#arw)"/>
+  <!-- accept yes -> emit -->
+  <line x1="410" y1="668" x2="410" y2="700" stroke="var(--edge)" stroke-width="2" marker-end="url(#arw)"/>
+  <text class="yes" x="418" y="690">accept</text>
+
+  <!-- FEEDBACK: verifier no -> up left channel -> budget -->
+  <path d="M326,342 L150,342 L150,140 L318,140"
+        fill="none" stroke="var(--fb)" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arwfb)"/>
+  <text class="no" x="300" y="334">no (leak / weak task)</text>
+  <!-- FEEDBACK: accept no -> up left channel -> budget -->
+  <path d="M326,626 L110,626 L110,140 L318,140"
+        fill="none" stroke="var(--fb)" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arwfb)"/>
+  <text class="no" x="300" y="650">no (too easy / gap small)</text>
+  <text class="edgelab" x="120" y="400" transform="rotate(-90 120 400)">feedback → challenger tries a new angle</text>
+
+  <!-- ============ NODES ============ -->
+  <!-- start -->
+  <rect x="320" y="30" width="180" height="44" rx="22" fill="var(--start)" stroke="var(--start-b)" stroke-width="1.5"/>
+  <text x="410" y="57" text-anchor="middle">Source document</text>
+
+  <!-- budget decision -->
+  <polygon points="410,96 502,140 410,184 318,140" fill="var(--dec)" stroke="var(--dec-b)" stroke-width="1.5"/>
+  <text x="410" y="134" text-anchor="middle">Budget left?</text>
+  <text class="mono" x="410" y="150" text-anchor="middle">rounds_run &lt; max</text>
+
+  <!-- stop -->
+  <rect x="612" y="118" width="180" height="44" rx="9" fill="var(--stop)" stroke="var(--stop-b)" stroke-width="1.5"/>
+  <text x="702" y="140" text-anchor="middle">Stop → return None</text>
+  <text class="mono" x="702" y="155" text-anchor="middle">max_rounds / global budget</text>
+
+  <!-- challenger -->
+  <rect x="290" y="212" width="240" height="54" rx="9" fill="var(--proc)" stroke="var(--proc-b)" stroke-width="1.5"/>
+  <text x="410" y="235" text-anchor="middle">① Challenger  (Opus)</text>
+  <text class="lab" x="410" y="252" text-anchor="middle">task/workflow + rubric (JSON)</text>
+
+  <!-- verifier decision -->
+  <polygon points="410,300 512,342 410,384 308,342" fill="var(--dec)" stroke="var(--dec-b)" stroke-width="1.5"/>
+  <text x="410" y="338" text-anchor="middle">② Quality</text>
+  <text x="410" y="354" text-anchor="middle">Verifier — gate</text>
+
+  <!-- solvers -->
+  <rect x="278" y="416" width="264" height="54" rx="9" fill="var(--proc)" stroke="var(--proc-b)" stroke-width="1.5"/>
+  <text x="410" y="439" text-anchor="middle">③ Solvers × N samples</text>
+  <text class="lab" x="410" y="456" text-anchor="middle">weak = Haiku · strong = Opus</text>
+
+  <!-- judge -->
+  <rect x="290" y="500" width="240" height="54" rx="9" fill="var(--proc)" stroke="var(--proc-b)" stroke-width="1.5"/>
+  <text x="410" y="523" text-anchor="middle">④ Judge  (Opus)</text>
+  <text class="lab" x="410" y="540" text-anchor="middle">score every answer vs rubric</text>
+
+  <!-- accept decision -->
+  <polygon points="410,584 534,626 410,668 286,626" fill="var(--dec)" stroke="var(--dec-b)" stroke-width="1.5"/>
+  <text x="410" y="622" text-anchor="middle">⑤ Accept?</text>
+  <text class="mono" x="410" y="638" text-anchor="middle">weak low · strong high · gap wide</text>
+
+  <!-- emit -->
+  <rect x="310" y="700" width="200" height="46" rx="9" fill="var(--accept)" stroke="var(--accept-b)" stroke-width="1.5"/>
+  <text x="410" y="722" text-anchor="middle">✔ Emit accepted example</text>
+  <text class="mono" x="410" y="737" text-anchor="middle">→ accepted.jsonl</text>
+</svg>
+</div>
+
+<div class="legend">
+  <span><span class="sw" style="background:var(--start)"></span>start / input</span>
+  <span><span class="sw" style="background:var(--proc)"></span>agent step</span>
+  <span><span class="sw" style="background:var(--dec)"></span>decision / gate</span>
+  <span><span class="sw" style="background:var(--accept)"></span>accepted output</span>
+  <span><span class="sw" style="background:var(--stop)"></span>stop</span>
+  <span><span class="sw" style="background:var(--fb)"></span>feedback (reject → new round)</span>
+</div>
+</body>
+</html>

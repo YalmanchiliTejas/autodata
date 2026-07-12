@@ -1,0 +1,25 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "autodata cli (mock)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "autodata.cli",
+      "args": ["data/", "--mock", "--max-rounds", "3"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "autodata cli (real)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "autodata.cli",
+      "args": ["data/", "--out", "accepted.jsonl", "--log", "trajectories.jsonl", "--trace-report", "trajectory.md", "--build-coverage"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    }
+  ]
+}
