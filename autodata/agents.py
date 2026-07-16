@@ -41,6 +41,13 @@ question. Make the objective action-oriented: inspect, diagnose, configure, plan
 transform, verify, or produce an artifact. Do not ask for an explanation, summary,
 or essay as the primary task.
 
+Scope every task to the supplied source extract. Do not assume, inspect, target, or
+refer to a local repository, project, service, API, UI, tool suite, or execution
+environment unless the source itself describes it. The task must stand alone: all
+context, inputs, constraints, actions, and rubric facts must be source-grounded.
+When an ENVIRONMENT CONTRACT is supplied, it is the sole exception: use only its
+explicit capabilities, tools, and constraints, and never invent provider behavior.
+
 Given a source document, produce a single JSON object with keys:
  "type": short phrase for the task type (e.g. "multi-step workflow",
    "constraint-based decision", "failure-mode diagnosis", "plan synthesis",
@@ -96,8 +103,9 @@ Check 3 - Rubric quality (STRICT, reject if ANY fail): positive criteria (weight
   a specific reasoning ERROR (not vague style). Report exact counts.
 Check 4 - Task-type consistency: does the type label match the actual workflow?
 Check 5 - Source fidelity: every material factual claim in the reference workflow and
-  rubric must be supported by the source extract. Reject invented API behavior,
-  numbers, constraints, or causal claims. Do not require exact wording.
+rubric must be supported by the source extract. Reject invented API behavior,
+numbers, constraints, causal claims, or project-specific interfaces. Do not require
+exact wording.
 
 Judge only against these checks; do not penalise the package for its subject matter.
 Output ONLY JSON: {"check1":"NO_LEAKAGE|LEAKS_WORKFLOW","check2":"GOOD|TOO_EASY|NON_EXECUTABLE",
@@ -105,9 +113,11 @@ Output ONLY JSON: {"check1":"NO_LEAKAGE|LEAKS_WORKFLOW","check2":"GOOD|TOO_EASY|
 "check5":"GROUNDED|UNSUPPORTED","overall":"PASS|FAIL","feedback":"specific issues to fix"}"""
 
 SOLVER_SYS = """You are the evaluated agent in an agent system. Carry out the user's
-request using the available context and tools. Return the final response that the user
-should receive: state what you did, the outcome, and relevant evidence or limitations.
-Do not return an execution plan, hidden evaluation criteria, or a generic essay."""
+request using only the supplied context and tools explicitly available in that context.
+Do not infer access to a local project, repository, service, API, or interface. Return
+the final response that the user should receive: state what you did, the outcome, and
+relevant evidence or limitations. Do not return an execution plan, hidden evaluation
+criteria, or a generic essay."""
 
 
 # Fig. 7: scoring is done by Kimi grading each answer against the rubric.
@@ -259,7 +269,7 @@ def extract_coverage(cfg, document):
 
 
 def challenge(cfg, source, feedback):
-    user = f"SOURCE (extract):\n{source}\n"
+    user = f"SOURCE (extract):\n{source}\n\n{cfg.environment.prompt()}\n"
     if cfg.rejection_reasons:  # cross-doc yield: steer away from recurring failures
         user += ("\nRECURRING FAILURE MODES across recent docs (avoid these):\n"
                  + "; ".join(cfg.rejection_reasons[-5:]) + "\n")

@@ -14,6 +14,8 @@ from .coverage import CoverageGraph
 from .loop import run_doc
 from .trajectory import TrajectoryLogger
 from .trajectory_report import write_trajectory_report
+from .environment import EnvironmentSpec
+from .export import export_jsonl
 
 
 def _shingles(text, k=5):
@@ -55,10 +57,27 @@ def main(argv=None):
     p.add_argument("--no-coverage", action="store_true",
                    help="disable coverage-guided generation and use one compact extract per document")
     p.add_argument("--trace-report", help="write a readable Markdown trace for this run")
+    p.add_argument("--environment", help="JSON file describing the target environment contract")
+    p.add_argument("--llm-provider", choices=("anthropic", "openai_compatible"), default="anthropic")
+    p.add_argument("--llm-base-url", default="", help="base URL for an OpenAI-compatible LLM provider")
+    p.add_argument("--llm-api-key-env", default="", help="environment variable containing that provider's API key")
+    p.add_argument("--export-format", choices=("openai_chat", "prime_verifiers"),
+                   help="export accepted JSONL to a portable training format")
+    p.add_argument("--export-out", help="destination for --export-format")
     args = p.parse_args(argv)
 
+    if bool(args.export_format) != bool(args.export_out):
+        p.error("--export-format and --export-out must be used together")
+    if args.export_format:
+        print(f"exported {export_jsonl(args.docs, args.export_out, args.export_format)} records -> {args.export_out}")
+        return
+    environment = EnvironmentSpec()
+    if args.environment:
+        environment = EnvironmentSpec.from_mapping(json.loads(pathlib.Path(args.environment).read_text()))
     cfg = Config(mock=args.mock, log_path=args.log, max_total_rounds=args.budget,
-                 extractor_workers=max(1, args.extractor_workers))
+                 extractor_workers=max(1, args.extractor_workers), environment=environment,
+                 llm_provider=args.llm_provider, llm_base_url=args.llm_base_url,
+                 llm_api_key_env=args.llm_api_key_env)
     if args.max_rounds:
         cfg.max_rounds = args.max_rounds
 

@@ -2,11 +2,16 @@
 deterministic offline stand-in so the loop and self-check run without a key.
 The key comes from ANTHROPIC_API_KEY (loaded from .env in autodata/__init__.py)."""
 import json
+import os
 
 _client = None
 
 
 def _real(cfg, model, system, user, max_tokens):
+    if cfg.llm_provider == "openai_compatible":
+        return _openai_compatible(cfg, model, system, user, max_tokens)
+    if cfg.llm_provider != "anthropic":
+        raise ValueError(f"unsupported llm_provider: {cfg.llm_provider}")
     global _client
     if _client is None:
         import anthropic
@@ -20,6 +25,22 @@ def _real(cfg, model, system, user, max_tokens):
         messages=[{"role": "user", "content": user}],
     )
     return "".join(b.text for b in resp.content if b.type == "text")
+
+
+def _openai_compatible(cfg, model, system, user, max_tokens):
+    """Call an OpenAI-compatible endpoint without coupling tasks to that vendor."""
+    from openai import OpenAI
+    key_name = cfg.llm_api_key_env or "OPENAI_API_KEY"
+    api_key = os.environ.get(key_name)
+    if not api_key:
+        raise RuntimeError(f"{key_name} is required for the openai_compatible provider")
+    client = OpenAI(api_key=api_key, base_url=cfg.llm_base_url or None,
+                    timeout=cfg.request_timeout_seconds, max_retries=cfg.request_max_retries)
+    response = client.chat.completions.create(
+        model=model, max_tokens=max_tokens,
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+    )
+    return response.choices[0].message.content or ""
 
 
 def _mock(cfg, model, system, user, max_tokens):

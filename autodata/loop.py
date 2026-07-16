@@ -188,6 +188,12 @@ def run_doc(cfg, log, doc_id, document, coverage=None):
                                  "fallback_after_failures": coverage_failure_streak}
             log.event("accept", round=r, **metrics)
             result = {"doc_id": doc_id, "round": r, **example, **metrics}
+            result["rollouts"] = {
+                "weak": [{"response": answer, "score": score}
+                         for answer, score in zip(weak_answers, weak_scores)],
+                "strong": [{"response": answer, "score": score}
+                           for answer, score in zip(strong_answers, strong_scores)],
+            }
             if coverage_info:
                 result["coverage"] = coverage_info
             return result

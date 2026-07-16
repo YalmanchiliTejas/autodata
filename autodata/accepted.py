@@ -5,8 +5,9 @@ import json
 import math
 
 
-SCHEMA_VERSION = "autodata.accepted.v3"
-PREVIOUS_SCHEMA_VERSION = "autodata.accepted.v2"
+SCHEMA_VERSION = "autodata.accepted.v4"
+PREVIOUS_SCHEMA_VERSION = "autodata.accepted.v3"
+OLDER_SCHEMA_VERSION = "autodata.accepted.v2"
 LEGACY_SCHEMA_VERSION = "autodata.accepted.v1"
 
 
@@ -64,7 +65,17 @@ def format_accepted(example, document_id, document, cfg):
             "strong_solver": cfg.strong_solver,
             "extractor": cfg.extractor,
         },
+        "environment": cfg.environment.to_dict(),
     }
+    strong = example.get("rollouts", {}).get("strong", [])
+    if strong:
+        preferred = max(strong, key=lambda rollout: rollout.get("score", -1))
+        record["learning"] = {
+            "preferred_example": {"response": preferred["response"], "score": preferred["score"]},
+            "selection": "highest-scoring strong rollout",
+            "rollout_counts": {"weak": len(example.get("rollouts", {}).get("weak", [])),
+                               "strong": len(strong)},
+        }
     if example.get("coverage"):
         record["coverage"] = example["coverage"]
     return record
@@ -77,14 +88,15 @@ def validate_accepted(record):
     if not isinstance(record, dict):
         return ["record is not an object"]
     errors = [f"missing {key}" for key in sorted(required - record.keys())]
-    if record.get("schema_version") not in {SCHEMA_VERSION, PREVIOUS_SCHEMA_VERSION, LEGACY_SCHEMA_VERSION}:
+    if record.get("schema_version") not in {SCHEMA_VERSION, PREVIOUS_SCHEMA_VERSION,
+                                             OLDER_SCHEMA_VERSION, LEGACY_SCHEMA_VERSION}:
         errors.append(f"unsupported schema_version: {record.get('schema_version')}")
     workflow = record.get("workflow", {})
     if not isinstance(workflow, dict):
         return errors + ["workflow is not an object"]
-    if record.get("schema_version") == SCHEMA_VERSION:
+    if record.get("schema_version") in {SCHEMA_VERSION, PREVIOUS_SCHEMA_VERSION}:
         workflow_keys = ("type", "context", "user_prompt", "task_spec", "reference_workflow", "rubric")
-    elif record.get("schema_version") == PREVIOUS_SCHEMA_VERSION:
+    elif record.get("schema_version") == OLDER_SCHEMA_VERSION:
         workflow_keys = ("type", "context", "task_spec", "reference_workflow", "rubric")
     else:
         workflow_keys = ("type", "context", "question", "reference_answer", "rubric")
@@ -101,4 +113,11 @@ def validate_accepted(record):
     for key in ("round", "weak_avg", "strong_avg", "gap", "policy"):
         if key not in acceptance:
             errors.append(f"acceptance missing {key}")
+    if record.get("schema_version") == SCHEMA_VERSION:
+        if not isinstance(record.get("environment"), dict):
+            errors.append("environment is not an object")
+        learning = record.get("learning", {})
+        preferred = learning.get("preferred_example", {}) if isinstance(learning, dict) else {}
+        if not isinstance(preferred.get("response"), str) or not preferred["response"].strip():
+            errors.append("learning.preferred_example.response must be a non-empty string")
     return errors

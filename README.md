@@ -30,6 +30,29 @@ generates an entirely new executable task, until accepted or the round budget is
 Every subagent turn and every accept/reject/feedback event is appended to a
 **trajectory log** (JSONL) so each agent's path can be replayed and audited.
 
+## Provider-neutral environments and learning data
+
+Autodata never hard-codes a target application. Supply an environment contract with
+its explicit capabilities, tools, and constraints; task generation can use only that
+contract and the grounding source. This works for a Gauntlet sandbox, a Prime
+environment, or any custom service without putting provider assumptions in prompts.
+
+```json
+{
+  "provider": "gauntlet",
+  "name": "staging-sandbox",
+  "description": "A sandboxed application workspace.",
+  "capabilities": ["inspect run status", "read project files"],
+  "tools": [{"name": "get_run", "description": "Read one run's status"}],
+  "constraints": ["Do not mutate production data"]
+}
+```
+
+Accepted records contain the contract, acceptance metrics, and the highest-scoring
+strong rollout as a preferred response. They can therefore feed a continuous loop:
+generate → verify → collect rollouts → retain a preferred response → export → train
+or evaluate → add failure evidence to the next source corpus.
+
 ## Run
 
 ```bash
@@ -41,6 +64,19 @@ python -m autodata.cli data/ --out accepted.jsonl
 
 # use bounded parallel extraction for large documentation files
 python -m autodata.cli data/ --out accepted.jsonl --extractor-workers 4
+
+# bind generation to an explicit environment contract
+python -m autodata.cli docs/ --environment environment.json --out accepted.jsonl
+
+# use an OpenAI-compatible inference endpoint (for example, Fireworks)
+export FIREWORKS_API_KEY=...
+python -m autodata.cli docs/ --llm-provider openai_compatible \
+  --llm-base-url https://api.fireworks.ai/inference/v1 \
+  --llm-api-key-env FIREWORKS_API_KEY --out accepted.jsonl
+
+# produce training-ready records from accepted data
+python -m autodata.cli accepted.jsonl --export-format openai_chat --export-out train.jsonl
+python -m autodata.cli accepted.jsonl --export-format prime_verifiers --export-out prime.jsonl
 
 # offline dry run (deterministic mock LLM, no key needed)
 python -m autodata.cli data/ --mock
@@ -59,6 +95,8 @@ Outputs: accepted examples in `accepted.jsonl`, full agent trajectories in
 | `autodata/agents.py` | the four subagents and their prompts |
 | `autodata/loop.py` | the accept/reject/feedback loop |
 | `autodata/trajectory.py` | JSONL trajectory logger |
+| `autodata/environment.py` | portable environment contract |
+| `autodata/export.py` | OpenAI-chat and Prime Verifiers dataset exports |
 | `autodata/cli.py` | run over a folder of documents |
 | `test_autodata.py` | offline self-check |
 

@@ -9,6 +9,8 @@ from autodata import Config, TrajectoryLogger, run_doc
 from autodata import agents
 from autodata.accepted import format_accepted, validate_accepted
 from autodata.coverage import CoverageGraph
+from autodata.environment import EnvironmentSpec
+from autodata.export import export_record
 from autodata.loop import _solve_samples, _valid_scores, _weak_rejection
 from autodata.trajectory_report import write_trajectory_report
 
@@ -98,11 +100,13 @@ def test_accepted_record_format():
                                {"step": 2, "action": "Deliver", "expected_result": "Result"}],
         "rubric": [{"criterion": "a", "weight": 1, "category": "positive"}],
         "weak_avg": 0.3, "strong_avg": 0.7, "gap": 0.4,
+        "rollouts": {"strong": [{"response": "Completed with evidence.", "score": 0.9}]},
     }
     record = format_accepted(raw, "paper.txt", "Source document", cfg)
     assert not validate_accepted(record)
     assert record["workflow"]["reference_workflow"][1]["action"] == "Deliver"
     assert record["source"]["sha256"]
+    assert record["learning"]["preferred_example"]["response"] == "Completed with evidence."
     print("OK: accepted workflow record is versioned and valid")
 
 
@@ -265,6 +269,39 @@ def test_solver_receives_user_request_not_hidden_task_contract():
     print("OK: solver sees only the user-facing request and visible context")
 
 
+def test_prompts_do_not_assume_a_local_project_or_tools():
+    assert "Do not assume, inspect, target, or\nrefer to a local repository" in agents.CHALLENGER_SYS
+    assert "only the supplied context and tools explicitly available" in agents.SOLVER_SYS
+    assert "project-specific interfaces" in agents.VERIFIER_SYS
+    print("OK: task prompts are source-scoped rather than project-scoped")
+
+
+def test_environment_contract_and_learning_exports_are_portable():
+    spec = EnvironmentSpec.from_mapping({
+        "provider": "example", "name": "test-env", "description": "A test service.",
+        "capabilities": ["read records"], "tools": [{"name": "lookup"}],
+        "constraints": ["No mutations"],
+    })
+    cfg = Config(mock=True, environment=spec)
+    example = {
+        "doc_id": "doc", "round": 1, "type": "diagnosis", "skill_tags": [], "context": "facts",
+        "user_prompt": "Please inspect the documented issue and provide a complete evidence-backed result.",
+        "task": {"objective": "Diagnose", "inputs": [], "constraints": [],
+                 "required_actions": ["Inspect", "Report"],
+                 "deliverables": [{"name": "result", "format": "text", "description": "result"}]},
+        "reference_workflow": [{"step": 1, "action": "Inspect", "expected_result": "facts"},
+                               {"step": 2, "action": "Report", "expected_result": "result"}],
+        "rubric": [{"criterion": "correct", "weight": 1, "category": "positive"}],
+        "weak_avg": 0.2, "strong_avg": 0.8, "gap": 0.6,
+        "rollouts": {"strong": [{"response": "Evidence-backed result.", "score": 0.8}]},
+    }
+    record = format_accepted(example, "doc", "source", cfg)
+    assert record["environment"]["name"] == "test-env"
+    assert export_record(record, "openai_chat")["messages"][-1]["content"] == "Evidence-backed result."
+    assert export_record(record, "prime_verifiers")["answer"] == "Evidence-backed result."
+    print("OK: environment contract and learning exports are portable")
+
+
 def test_solver_rollouts_run_concurrently_and_keep_order():
     cfg = Config(mock=True, solver_samples=3)
     original_solve = agents.solve
@@ -300,5 +337,7 @@ if __name__ == "__main__":
     test_coverage_escalates_after_strong_failures()
     test_trajectory_report_includes_model_context()
     test_solver_receives_user_request_not_hidden_task_contract()
+    test_prompts_do_not_assume_a_local_project_or_tools()
+    test_environment_contract_and_learning_exports_are_portable()
     test_solver_rollouts_run_concurrently_and_keep_order()
     print("PASS")

@@ -1,9 +1,15 @@
 """Config for Agentic Self-Instruct (Autodata, arXiv:2606.25996)."""
 from dataclasses import dataclass, field
+from .environment import EnvironmentSpec
 
 
 @dataclass
 class Config:
+    # Model-provider transport. `openai_compatible` supports endpoints such as
+    # Fireworks without making a particular inference vendor part of task logic.
+    llm_provider: str = "anthropic"
+    llm_base_url: str = ""
+    llm_api_key_env: str = ""
     # Which Anthropic model plays each role. Strong must out-reason weak (the whole
     # pipeline mines tasks where weak fails and strong succeeds), so generation +
     # judging use the strong model; extraction + the weak solver use the cheap one.
@@ -47,3 +53,6 @@ class Config:
 
     # Yield: recent cross-doc rejection reasons, fed back into the challenger.
     rejection_reasons: list = field(default_factory=list)
+
+    # A provider supplies this contract; task generation may use no other tools.
+    environment: EnvironmentSpec = field(default_factory=EnvironmentSpec)
