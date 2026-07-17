@@ -1,0 +1,6 @@
+# Core runtime uses only the Python standard library.
+# Required to deploy deploy/modal_vllm_weak.py.
+modal>=1.0
+
+# Development and verification.
+pytest>=8.0

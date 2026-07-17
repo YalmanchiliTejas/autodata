@@ -1,0 +1,16 @@
+{
+  "tasks": "tasks.json",
+  "sources": "sources.jsonl",
+  "output": "dataset.jsonl",
+  "report": "dataset-report.json",
+  "rounds": 4,
+  "models": {
+    "challenger": {"provider": "anthropic", "model": "claude-sonnet-4-20250514", "api_key_env": "ANTHROPIC_API_KEY", "max_tokens": 8192},
+    "judge": {"provider": "anthropic", "model": "claude-sonnet-4-20250514", "api_key_env": "ANTHROPIC_API_KEY", "max_tokens": 8192},
+    "quality_verifier": {"provider": "anthropic", "model": "claude-sonnet-4-20250514", "api_key_env": "ANTHROPIC_API_KEY", "max_tokens": 4096},
+    "strong": {"provider": "anthropic", "model": "claude-opus-4-20250514", "api_key_env": "ANTHROPIC_API_KEY", "max_tokens": 8192},
+    "weak": {"provider": "openai_compatible", "base_url": "https://YOUR-MODAL-ENDPOINT.modal.run", "model": "Qwen/Qwen3.5-4B", "extra_headers_env": {"Modal-Key": "MODAL_KEY", "Modal-Secret": "MODAL_SECRET"}, "max_tokens": 4096}
+  },
+  "evaluation": {"weak_rollouts": 3, "strong_rollouts": 3, "weak_screen_max": 0.65},
+  "utility_gate": {"calibration_examples": 20, "selection_quantile": 0.6}
+}
