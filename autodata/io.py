@@ -21,3 +21,8 @@ def load_sources(path: str | Path) -> list[SourceDocument]:
 
 def write_jsonl(path: str | Path, candidates: list[Candidate]) -> None:
     Path(path).write_text("".join(json.dumps(item.as_dict(), ensure_ascii=False) + "\n" for item in candidates))
+
+
+def write_records_jsonl(path: str | Path, records: list[dict]) -> None:
+    """Write audit records that are not necessarily Candidate objects."""
+    Path(path).write_text("".join(json.dumps(item, ensure_ascii=False) + "\n" for item in records))

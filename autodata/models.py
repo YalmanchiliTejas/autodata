@@ -66,6 +66,7 @@ class Evaluation:
     strong_rollouts: list[float] = field(default_factory=list)
     verdict: str = "improve"
     suggestion_for_writer: str | None = None
+    failure_kind: str | None = None
 
     @property
     def gap(self) -> float | None:
@@ -77,7 +78,8 @@ class Evaluation:
         return {"valid": self.valid, "weak_score": self.weak_score, "strong_score": self.strong_score,
                 "judge_score": self.judge_score, "gap": self.gap, "reasons": self.reasons,
                 "weak_rollouts": self.weak_rollouts, "strong_rollouts": self.strong_rollouts,
-                "verdict": self.verdict, "suggestion_for_writer": self.suggestion_for_writer}
+                "verdict": self.verdict, "suggestion_for_writer": self.suggestion_for_writer,
+                "failure_kind": self.failure_kind}
 
 
 @dataclass(slots=True)
@@ -90,6 +92,8 @@ class DatasetReport:
     source_counts: dict[str, int] = field(default_factory=dict)
     quality_issues: list[str] = field(default_factory=list)
     recommendations: list[str] = field(default_factory=list)
+    attempted: int = 0
+    rejection_counts: dict[str, int] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)

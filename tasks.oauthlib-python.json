@@ -1,0 +1,32 @@
+[
+  {
+    "name": "oauthlib-python-implementation",
+    "kind": "coding",
+    "instructions": "Create one self-contained Python implementation task grounded only in the supplied OAuthLib documentation excerpt. The task must specify a small function or class API, concrete input/output behavior, edge cases, a reference solution, and deterministic tests. It may model documented parsing, validation, state transitions, request construction, scope handling, or error classification. Do not require the oauthlib package, network access, real credentials, real tokens, cryptographic signing, or web-framework integration. Do not ask the solver to implement OAuth security or cryptography; use inert placeholder strings wherever an example needs a token. The supplied tests must execute using only Python's standard library.",
+    "capabilities": ["python-implementation"],
+    "target_difficulty": "adaptive",
+    "max_rounds": 3,
+    "source_policy": "grounded_only",
+    "constraints": [
+      "Include a precise function or class signature",
+      "Use Python standard library only",
+      "Keep all data local and deterministic",
+      "Make tests executable without external services"
+    ],
+    "forbidden_content": [
+      "network access",
+      "real credentials",
+      "real access tokens",
+      "cryptographic key generation",
+      "security exploitation"
+    ],
+    "environment": {
+      "available_tools": [],
+      "permitted_inputs": ["solver-visible task statement", "supplied starter code if any"],
+      "success_conditions": ["The submitted Python implementation passes the supplied deterministic tests"],
+      "execution_limits": {"network": false, "external_packages": false},
+      "evaluator_behavior": "Execute only the generated deterministic unit tests in an isolated sandbox; score documented behavior rather than style."
+    },
+    "require_rubric": true
+  }
+]

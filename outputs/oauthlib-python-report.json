@@ -1,0 +1,19 @@
+{
+  "total": 0,
+  "accepted": 0,
+  "duplicate_pairs": [],
+  "capability_counts": {},
+  "difficulty_counts": {},
+  "source_counts": {},
+  "quality_issues": [
+    "underrepresented capability: python-implementation"
+  ],
+  "recommendations": [
+    "Generate more examples targeting capability 'python-implementation'."
+  ],
+  "attempted": 9,
+  "rejection_counts": {
+    "rejected_evaluation": 7,
+    "rejected_structure": 2
+  }
+}

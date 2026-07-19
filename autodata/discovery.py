@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .json_output import extract_json_object
 from .models import SourceDocument, TaskSpec
 from .providers import TextModel
 
@@ -57,7 +58,12 @@ class SourceProfiler:
 Identify only facts and operations actually supported by its content. Mark it unsuitable if it lacks transferable, answerable material or if claims cannot be grounded.
 Return ONLY JSON: {{"suitable": true|false, "source_type": "...", "reliability_notes": "...", "grounded_facts": ["..."], "transferable_operations": ["reasoning/action supported by the source"], "candidate_capabilities": ["..."], "proposed_environment": {{"permitted_inputs": [], "available_tools": [], "success_conditions": []}}, "exclusion_reasons": ["..."]}}.
 Source ID: {source.id}\nSource:\n{source.content}"""
-        data = json.loads(self.model.complete(prompt))
+        data = extract_json_object(
+            self.model.complete(prompt),
+            {"suitable", "source_type", "reliability_notes", "grounded_facts", "transferable_operations",
+             "candidate_capabilities", "proposed_environment", "exclusion_reasons"},
+            producer="source profiler",
+        )
         return SourceProfile(source.id, bool(data["suitable"]), str(data["source_type"]), str(data.get("reliability_notes", "")),
                              list(data.get("grounded_facts", [])), list(data.get("transferable_operations", [])),
                              list(data.get("candidate_capabilities", [])), dict(data.get("proposed_environment", {})),
@@ -79,5 +85,9 @@ User objective: {objective}
 Hard constraints: {constraints or []}
 Profile: {json.dumps(asdict(profile), ensure_ascii=False)}
 Return ONLY JSON: {{"name": "...", "kind": "qa|math|coding|legal|custom", "instructions": "...", "capabilities": ["..."], "output_schema": {{}}, "source_policy": "grounded_only|grounded_with_explicit_assumptions|creative", "environment": {{"permitted_inputs": [], "available_tools": [], "success_conditions": [], "evaluator_behavior": "..."}}, "require_rubric": true|false}}."""
-        data = json.loads(self.model.complete(prompt))
+        data = extract_json_object(
+            self.model.complete(prompt),
+            {"name", "kind", "instructions"},
+            producer="contract synthesizer",
+        )
         return TaskSpec(**data)

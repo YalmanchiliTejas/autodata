@@ -32,7 +32,8 @@ def validate_rubric(payload: dict, capabilities: list[str], environment: dict) -
         texts.append(criterion)
         if len(criterion) < 12 or any(phrase in criterion.lower() for phrase in GENERIC_CRITERIA):
             issues.append(f"rubric item {index} is not an observable task-specific check")
-        if "weight" in item and (not isinstance(item["weight"], int) or item["weight"] == 0):
+        if ("weight" not in item or isinstance(item.get("weight"), bool)
+                or not isinstance(item.get("weight"), int) or item["weight"] == 0):
             issues.append(f"rubric item {index} needs a non-zero integer weight")
         if item.get("category") not in (None, "positive", "negative"):
             issues.append(f"rubric item {index} has invalid category")

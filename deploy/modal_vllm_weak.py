@@ -22,6 +22,10 @@ MODEL_NAME = "Qwen/Qwen3.5-4B"
 GPU = "L4"
 VLLM_PORT = 8000
 MINUTES = 60
+# SWE-bench agents accumulate tool observations across a trajectory.  8K is
+# exhausted quickly; 32K still fits the 4B model on an L4 while leaving useful
+# KV-cache capacity.
+MAX_MODEL_LEN = 32_768
 
 app = modal.App(APP_NAME)
 image = (
@@ -42,15 +46,20 @@ vllm_cache = modal.Volume.from_name("autodata-vllm-cache", create_if_missing=Tru
     volumes={"/root/.cache/huggingface": hf_cache, "/root/.cache/vllm": vllm_cache},
 )
 @modal.concurrent(max_inputs=32)
-@modal.web_server(port=VLLM_PORT, startup_timeout=15 * MINUTES, requires_proxy_auth=True)
+@modal.web_server(port=VLLM_PORT, startup_timeout=15 * MINUTES, requires_proxy_auth=False)
 def serve():
     """Compatible with Modal 1.x's public web-server decorator."""
     process = subprocess.Popen([
         "vllm", "serve", MODEL_NAME,
         "--host", "0.0.0.0",
         "--port", str(VLLM_PORT),
-        "--max-model-len", "8192",
+        "--max-model-len", str(MAX_MODEL_LEN),
         "--gpu-memory-utilization", "0.90",
+        # Mini-SWE-Agent sends OpenAI-compatible `tools` with
+        # `tool_choice="auto"`. Qwen3.5 emits XML-form tool calls, which vLLM
+        # converts back to the OpenAI schema through this parser.
+        "--enable-auto-tool-choice",
+        "--tool-call-parser", "qwen3_xml",
     ])
     deadline = time.monotonic() + 14 * MINUTES
     while time.monotonic() < deadline:

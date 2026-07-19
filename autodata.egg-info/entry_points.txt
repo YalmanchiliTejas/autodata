@@ -1,0 +1,2 @@
+[console_scripts]
+autodata = autodata.cli:main

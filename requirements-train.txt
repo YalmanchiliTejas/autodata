@@ -1,0 +1,8 @@
+# Install only in the GPU training environment. Pin these after the first
+# successful run so the experiment remains reproducible.
+torch>=2.6
+transformers>=4.50
+datasets>=3.0
+accelerate>=1.4
+peft>=0.15
+trl>=0.26

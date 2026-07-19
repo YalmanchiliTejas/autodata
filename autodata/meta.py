@@ -13,6 +13,7 @@ import random
 from dataclasses import dataclass, field, replace
 from typing import Protocol
 
+from .json_output import extract_json_object
 from .models import SourceDocument, TaskSpec
 from .pipeline import DatasetBuilder
 from .providers import TextModel
@@ -109,7 +110,7 @@ Current added guidance: {parent.guidance or '(none)'}
 Observed training diagnostics: {diagnostics}
 Return ONLY JSON: {{"revision": "imperative guidance to append", "rationale": "why this addresses the diagnostic"}}."""
         try:
-            response = json.loads(self.mutator.complete(prompt))
+            response = extract_json_object(self.mutator.complete(prompt), {"revision", "rationale"}, producer="mutator")
             revision = str(response["revision"]).strip()
             rationale = str(response.get("rationale", "")).strip()
             if not revision:

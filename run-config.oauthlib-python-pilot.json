@@ -1,0 +1,17 @@
+{
+  "tasks": "tasks.oauthlib-python.json",
+  "sources": "sources.oauthlib-python-pilot.jsonl",
+  "output": "outputs/oauthlib-python-candidates.jsonl",
+  "report": "outputs/oauthlib-python-report.json",
+  "solver_prompt_log": "outputs/oauthlib-python-solver-prompts.log",
+  "rounds": 3,
+  "stop_after_accept_per_source": true,
+  "models": {
+    "challenger": {"provider": "anthropic", "model": "claude-sonnet-4-6", "api_key_env": "ANTHROPIC_API_KEY", "max_tokens": 8192},
+    "judge": {"provider": "anthropic", "model": "claude-sonnet-4-6", "api_key_env": "ANTHROPIC_API_KEY", "max_tokens": 8192},
+    "quality_verifier": {"provider": "anthropic", "model": "claude-sonnet-4-6", "api_key_env": "ANTHROPIC_API_KEY", "max_tokens": 4096},
+    "strong": {"provider": "anthropic", "model": "claude-opus-4-7", "api_key_env": "ANTHROPIC_API_KEY", "max_tokens": 8192},
+    "weak": {"provider": "openai_compatible", "base_url": "https://gauntlet--autodata-weak-vllm-serve.modal.run", "model": "Qwen/Qwen3.5-4B", "max_tokens": 4096, "timeout": 180, "max_retries": 2, "retry_backoff": 2}
+  },
+  "evaluation": {"weak_rollouts": 3, "strong_rollouts": 3, "weak_screen_max": 0.65}
+}

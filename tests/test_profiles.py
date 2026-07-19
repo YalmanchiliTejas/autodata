@@ -7,6 +7,14 @@ def test_cs_profile_emits_paper_rubric_contract():
     prompt = ADAPTERS["qa"].generation_prompt(spec, SourceDocument("paper", "paper text"), [])
     assert "10–15" in prompt
     assert "entirely new reasoning angle" in prompt
+    assert '"answer"' in prompt
+    assert "keys: question_type" not in prompt
+
+
+def test_scientific_profile_keeps_parser_required_rubric_in_schema():
+    spec = TaskSpec("science", "qa", "Create a science task", profile="scientific_reasoning")
+    prompt = ADAPTERS["qa"].generation_prompt(spec, SourceDocument("paper", "paper text"), [])
+    assert '"rubric"' in prompt
 
 
 def test_legal_adapter_requires_paper_six_key_rubric_schema():

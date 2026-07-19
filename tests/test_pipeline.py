@@ -20,8 +20,14 @@ class Solver:
 
 
 class Judge:
+    def __init__(self):
+        self.calls = 0
+
     def complete(self, prompt, *, system=""):
-        return json.dumps({"valid": True, "weak_score": 0.2, "strong_score": 0.9,
+        self.calls += 1
+        if self.calls == 1:
+            return json.dumps({"valid": True, "weak_scores": [0.2, 0.2, 0.2], "judge_score": 0.95, "reasons": []})
+        return json.dumps({"valid": True, "weak_scores": [0.2, 0.2, 0.2], "strong_scores": [0.9, 0.9, 0.9],
                            "judge_score": 0.95, "reasons": []})
 
 

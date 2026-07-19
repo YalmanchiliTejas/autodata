@@ -1,4 +1,6 @@
-# Core runtime uses only the Python standard library.
+# Loads local .env credentials for the runner.
+python-dotenv>=1.0
+
 # Required to deploy deploy/modal_vllm_weak.py.
 modal>=1.0
 

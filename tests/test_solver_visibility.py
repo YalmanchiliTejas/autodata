@@ -1,6 +1,6 @@
 import json
 
-from autodata.evaluation import CandidateEvaluator
+from autodata.evaluation import CandidateEvaluator, _format_solver_prompt_log
 from autodata.models import Candidate, TaskSpec
 
 
@@ -24,7 +24,9 @@ class Judge:
         self.calls += 1
         self.prompts.append(prompt)
         if self.calls == 1:
-            return json.dumps({"valid": True, "weak_score": 0.1, "strong_score": 0.9, "judge_score": 1, "reasons": []})
+            return json.dumps({"valid": True, "weak_scores": [0.1], "judge_score": 1, "reasons": []})
+        if self.calls == 2:
+            return json.dumps({"valid": True, "weak_scores": [0.1], "strong_scores": [0.9], "judge_score": 1, "reasons": []})
         return json.dumps({"verdict": "accept", "rubric_concerns": []})
 
 
@@ -38,3 +40,23 @@ def test_solvers_never_receive_challenger_reference_or_rubric():
     assert "rubric" not in solver_prompts
     assert "top-secret-reference-42" not in judge.prompts[0]
     assert weak.systems == strong.systems
+
+
+def test_solver_prompt_log_is_human_readable_and_excludes_hidden_fields():
+    spec = TaskSpec("code-task", "coding", "x", environment={"network": False})
+    candidate = Candidate("candidate-1", "code-task", "source-1", {
+        "prompt": "Implement solve(value).", "reference_solution": "secret", "rubric": ["hidden"]})
+    visible = {"prompt": "Implement solve(value).", "environment": {"network": False}}
+
+    entry = _format_solver_prompt_log(spec, candidate, "weak", 2, 3, "Solve carefully.", visible)
+
+    assert "SOLVER PROMPT" in entry
+    assert "candidate_id  : candidate-1" in entry
+    assert "source_id     : source-1" in entry
+    assert "solver_role   : weak" in entry
+    assert "rollout       : 2/3" in entry
+    assert "[SYSTEM PROMPT]" in entry
+    assert "[USER PROMPT — SOLVER-VISIBLE TASK JSON]" in entry
+    assert '  "prompt": "Implement solve(value)."' in entry
+    assert "secret" not in entry
+    assert "rubric" not in entry
