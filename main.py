@@ -29,7 +29,7 @@ def provider(config: dict):
     raise ValueError(f"unsupported provider {kind!r}; use anthropic or openai_compatible")
 
 
-def configure_logging(solver_prompt_path: str | Path) -> Path:
+def configure_logging(solver_prompt_path: str | Path, *, append: bool = False) -> Path:
     """Keep operational events on stdout and full solver prompts in a dedicated file."""
     logging.basicConfig(level=logging.INFO, format="[autodata] %(message)s")
     path = Path(solver_prompt_path)
@@ -38,7 +38,7 @@ def configure_logging(solver_prompt_path: str | Path) -> Path:
     for handler in list(prompt_logger.handlers):
         handler.close()
         prompt_logger.removeHandler(handler)
-    handler = logging.FileHandler(path, mode="w", encoding="utf-8")
+    handler = logging.FileHandler(path, mode="a" if append else "w", encoding="utf-8")
     handler.setFormatter(logging.Formatter("%(message)s"))
     prompt_logger.addHandler(handler)
     prompt_logger.setLevel(logging.INFO)
@@ -51,13 +51,15 @@ def main() -> None:
     parser.add_argument("--config", required=True, help="JSON run configuration")
     parser.add_argument("--audit-output", help="Optional JSONL trace; defaults beside the dataset output")
     parser.add_argument("--solver-prompt-log", help="Formatted weak/strong solver prompt transcript")
+    parser.add_argument("--checkpoint", help="Atomic run checkpoint; defaults beside the dataset output")
+    parser.add_argument("--resume", action="store_true", help="Resume completed attempts from --checkpoint")
     parser.add_argument("--source-limit", type=int, help="Run only the first N source chunks; useful for debugging")
     args = parser.parse_args()
     load_dotenv(Path.cwd() / ".env")
     config = json.loads(Path(args.config).read_text())
     default_prompt_log = str(Path(config["output"]).with_suffix(".solver-prompts.log"))
     solver_prompt_path = configure_logging(
-        args.solver_prompt_log or config.get("solver_prompt_log") or default_prompt_log)
+        args.solver_prompt_log or config.get("solver_prompt_log") or default_prompt_log, append=args.resume)
     if args.source_limit is not None and args.source_limit < 1:
         parser.error("--source-limit must be at least 1")
     models = config["models"]
@@ -69,7 +71,9 @@ def main() -> None:
     evaluation = CandidateEvaluator(weak, strong, judge, quality_verifier=verifier,
                                     **config.get("evaluation", {}))
     utility = AdaptiveUtilityGate(**config["utility_gate"]) if config.get("utility_gate") else None
-    builder = DatasetBuilder(challenger, evaluation, utility_gate=utility)
+    checkpoint_path = args.checkpoint or config.get("checkpoint") or str(Path(config["output"]).with_suffix(".checkpoint.json"))
+    builder = DatasetBuilder(challenger, evaluation, utility_gate=utility,
+                             checkpoint_path=checkpoint_path, resume=args.resume)
     sources = load_sources(config["sources"])
     if args.source_limit is not None:
         sources = sources[:args.source_limit]
@@ -81,7 +85,7 @@ def main() -> None:
     write_records_jsonl(audit_path, builder.audit_events)
     Path(config.get("report", "dataset-report.json")).write_text(json.dumps(report.as_dict(), indent=2) + "\n")
     print(f"attempted {report.attempted}; accepted {report.accepted}; audit: {audit_path}; "
-          f"solver prompts: {solver_prompt_path}")
+          f"solver prompts: {solver_prompt_path}; checkpoint: {checkpoint_path}")
 
 
 if __name__ == "__main__":

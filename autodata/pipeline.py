@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from collections import Counter
 import json
 import logging
+from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
 
@@ -21,13 +22,18 @@ class DatasetBuilder:
     """Agentic generation with cumulative, dataset-level feedback."""
 
     def __init__(self, generator: TextModel, evaluator: CandidateEvaluator,
-                 quality: DatasetQualityController | None = None, utility_gate: AdaptiveUtilityGate | None = None):
+                 quality: DatasetQualityController | None = None, utility_gate: AdaptiveUtilityGate | None = None,
+                 *, checkpoint_path: str | Path | None = None, resume: bool = False):
         self.generator, self.evaluator = generator, evaluator
         self.quality = quality or DatasetQualityController()
         self.utility_gate = utility_gate
         self.last_attempts: list[Candidate] = []
         self.audit_events: list[dict] = []
         self.logger = logging.getLogger("autodata")
+        self.checkpoint_path = Path(checkpoint_path) if checkpoint_path else None
+        self.resume = resume
+        self._checkpoint_candidates: list[Candidate] = []
+        self._checkpoint_feedback: dict[str, list[str]] = {}
 
     def build(self, specs: Iterable[TaskSpec], sources: Iterable[SourceDocument], *,
               rounds_per_source: int = 3, stop_after_accept_per_source: bool = False) -> tuple[list[Candidate], DatasetReport]:
@@ -35,6 +41,23 @@ class DatasetBuilder:
         candidates: list[Candidate] = []
         self.last_attempts = []
         self.audit_events = []
+        feedback_by_scope: dict[str, list[str]] = {}
+        if self.resume and self.checkpoint_path and self.checkpoint_path.exists():
+            candidates, feedback_by_scope = self._load_checkpoint()
+            self.logger.info("stage=checkpoint_loaded path=%s accepted=%s attempts=%s audit_events=%s",
+                             self.checkpoint_path, len(candidates), len(self.last_attempts), len(self.audit_events))
+        self._checkpoint_candidates = candidates
+        self._checkpoint_feedback = feedback_by_scope
+        terminal_statuses = {"accepted", "rejected_structure", "rejected_evaluation", "rejected_utility",
+                             "rejected_dataset_quality", "generation_or_parse_error", "inference_error"}
+        completed_attempts = {
+            (event["task"], event["source_id"], event["attempt"])
+            for event in self.audit_events if event["status"] in terminal_statuses
+        }
+        accepted_scopes = {
+            (event["task"], event["source_id"])
+            for event in self.audit_events if event["status"] == "accepted"
+        }
         requested_capabilities = [cap for spec in specs for cap in spec.capabilities]
         for spec in specs:
             adapter = ADAPTERS[spec.kind]
@@ -43,10 +66,19 @@ class DatasetBuilder:
                 # Reflection, structure, and evaluation feedback is evidence
                 # about this exact grounding chunk. Carrying it into another
                 # chunk can import irrelevant facts and failed task designs.
-                feedback: list[str] = []
+                scope_key = _scope_key(spec.name, source.id)
+                feedback = feedback_by_scope.setdefault(scope_key, [])
+                if stop_after_accept_per_source and (spec.name, source.id) in accepted_scopes:
+                    self.logger.info("task=%s source=%s/%s stage=resume_source_skipped reason=already_accepted",
+                                     spec.name, source_index, len(sources))
+                    continue
                 self.logger.info("task=%s source=%s/%s stage=feedback_scope_initialized scope=source_chunk",
                                  spec.name, source_index, len(sources))
                 for attempt in range(1, attempt_limit + 1):
+                    if (spec.name, source.id, attempt) in completed_attempts:
+                        self.logger.info("task=%s source=%s attempt=%s stage=resume_attempt_skipped reason=terminal_event_exists",
+                                         spec.name, source_index, attempt)
+                        continue
                     try:
                         self._audit(spec, source, attempt, "generating", source_index=source_index, source_total=len(sources))
                         if feedback:
@@ -140,8 +172,7 @@ class DatasetBuilder:
                                             spec.name, source_index, attempt, exc)
                         self._audit(spec, source, attempt, "inference_error", reasons=[str(exc)])
         report = self.quality.analyze(candidates, requested_capabilities)
-        terminal_statuses = {"accepted", "rejected_structure", "rejected_evaluation", "rejected_utility",
-                             "rejected_dataset_quality", "generation_or_parse_error", "inference_error"}
+        self._save_checkpoint(complete=True)
         report.attempted = sum(event["status"] in terminal_statuses for event in self.audit_events)
         report.rejection_counts = dict(Counter(
             event["status"] for event in self.audit_events
@@ -165,9 +196,37 @@ class DatasetBuilder:
             "solver_visible_task": solver_visible_task,
         }
         self.audit_events.append(event)
+        self._save_checkpoint()
         position = f" source={source_index}/{source_total}" if source_index and source_total else ""
         reason = f" reason={event['reasons'][0]}" if event["reasons"] else ""
         self.logger.info("task=%s%s attempt=%s status=%s%s", spec.name, position, attempt, status, reason)
+
+    def _save_checkpoint(self, *, complete: bool = False) -> None:
+        if not self.checkpoint_path:
+            return
+        state = {
+            "version": 1,
+            "complete": complete,
+            "accepted_candidates": [candidate.as_dict() for candidate in self._checkpoint_candidates],
+            "last_attempts": [candidate.as_dict() for candidate in self.last_attempts],
+            "audit_events": self.audit_events,
+            "feedback_by_scope": self._checkpoint_feedback,
+        }
+        self.checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.checkpoint_path.with_name(self.checkpoint_path.name + ".tmp")
+        temporary.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n")
+        temporary.replace(self.checkpoint_path)
+
+    def _load_checkpoint(self) -> tuple[list[Candidate], dict[str, list[str]]]:
+        assert self.checkpoint_path is not None
+        state = json.loads(self.checkpoint_path.read_text())
+        if state.get("version") != 1:
+            raise ValueError(f"unsupported checkpoint version in {self.checkpoint_path}")
+        self.audit_events = list(state.get("audit_events", []))
+        self.last_attempts = [_candidate_from_dict(item) for item in state.get("last_attempts", [])]
+        candidates = [_candidate_from_dict(item) for item in state.get("accepted_candidates", [])]
+        feedback = {str(key): list(value) for key, value in state.get("feedback_by_scope", {}).items()}
+        return candidates, feedback
 
     @staticmethod
     def _failure_feedback(evaluation) -> list[str]:
@@ -240,6 +299,14 @@ def _candidate_summary(candidate: Candidate) -> dict:
     return {"fields": sorted(candidate.payload), "rubric_items": len(candidate.payload.get("rubric", [])),
             "test_items": len(candidate.payload.get("tests", [])), "capabilities": candidate.capabilities,
             "difficulty": candidate.difficulty}
+
+
+def _candidate_from_dict(value: dict) -> Candidate:
+    return Candidate(**value)
+
+
+def _scope_key(task_name: str, source_id: str) -> str:
+    return f"{task_name}\0{source_id}"
 
 
 def _format_orchestrator_strategy(reflection: dict) -> str:

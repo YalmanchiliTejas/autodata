@@ -3,6 +3,8 @@
   "sources": "sources.jsonl",
   "output": "dataset.jsonl",
   "report": "dataset-report.json",
+  "checkpoint": "dataset.checkpoint.json",
+  "solver_prompt_log": "solver-prompts.log",
   "rounds": 4,
   "models": {
     "challenger": {"provider": "anthropic", "model": "claude-sonnet-4-6", "api_key_env": "ANTHROPIC_API_KEY", "max_tokens": 8192},

@@ -117,13 +117,24 @@ Recommendations feed back into later prompts. In production, replace the lexical
 
 ## Challenger → rubric → solver flow
 
-The `generator` provider is the paper's **challenger**. For each candidate it first authors the task and reference internally, then emits the task package and its `rubric`. The static rubric gate and optional quality verifier run before weak/strong solver rollouts. The solvers receive only the solver-visible surface (`context`, `question`, `problem`, or `prompt`); answers, solutions, rubrics, tests, and audit metadata are deliberately withheld. The judge receives the full package plus rollouts, decides whether the reward is useful, and supplies a concrete improvement instruction for the next challenger round.
+The `generator` provider is the paper's **challenger**. For each candidate it first authors the task and reference internally, then emits the task package and its `rubric`. The static rubric gate and optional quality verifier run before weak/strong solver rollouts. The solvers receive only the solver-visible surface (`context`, `question`, `problem`, or `prompt`); answers, solutions, rubrics, tests, and audit metadata are deliberately withheld. The judge receives the solver-visible task, rubric, and rollouts—but not the reference solution—marks every rubric criterion true or false for each response, and supplies a concrete improvement instruction. Autodata computes normalized rewards deterministically from those matches and the signed rubric weights. A candidate is never accepted when the loop judge returns `improve`.
 
 `require_rubric` defaults to `true` for RL-oriented data. Set it to `false` only for a task with an explicit non-rubric verifier, such as deterministic program execution.
 
 ### Solver and judge prompts
 
-The solver prompts implement the evaluation discipline described in the paper rather than asking the weak model to “be weak.” Weak and strong receive the **identical system prompt**, exact same solver-visible task, and same environment. This prevents a prompt-induced gap from being mistaken for a capability gap. If a stronger solver should have more inference-time compute, tools, or aggregation—as permitted by the paper—configure that difference in the two provider/harness instances, with every extra capability declared in the environment contract; never encode it by silently changing the system prompt. The rubric scorer sees the task, environment, rubric, and responses—but not the reference answer—and scores each criterion independently and binary before producing normalized per-rollout rewards.
+The solver prompts implement the evaluation discipline described in the paper rather than asking the weak model to “be weak.” Weak and strong receive the **identical system prompt**, exact same solver-visible task, and same environment. This prevents a prompt-induced gap from being mistaken for a capability gap. If a stronger solver should have more inference-time compute, tools, or aggregation—as permitted by the paper—configure that difference in the two provider/harness instances, with every extra capability declared in the environment contract; never encode it by silently changing the system prompt. The rubric scorer sees the task, environment, rubric, and responses—but not the reference answer—and marks each criterion independently and binary. Autodata then applies min-max normalization over the rubric's attainable range, so avoiding every negative criterion and satisfying every positive criterion always scores `1.0`.
+
+## Checkpointing and resume
+
+The configured runner writes an atomic checkpoint after every audit event. It contains accepted candidates, rejected attempts, the audit trajectory, and source-local challenger feedback. If a process exits during a model request, the incomplete attempt is retried; attempts with terminal events are not repeated.
+
+```bash
+python main.py --config run-config.json --checkpoint outputs/run.checkpoint.json
+python main.py --config run-config.json --checkpoint outputs/run.checkpoint.json --resume
+```
+
+On resume, the formatted solver-prompt transcript is appended rather than overwritten. Final dataset, audit JSONL, and report files are materialized normally when the resumed build completes.
 
 ## Dynamic ingestion and utility verification
 
@@ -244,4 +255,4 @@ The runner uses an OpenAI-compatible endpoint for the small weak model, so the i
 
 Every VLLM deployment has a physical context ceiling because its KV cache must fit on the selected GPU. Autodata's `ContextController` makes the policy above that ceiling explicit: provide `ContextSegment`s for policy/task/environment (`protected=True`) and lower-priority source excerpts, feedback, or old tool observations (`artifact_ref` can point at the full stored material). It uses a conservative token estimate, compacts only unprotected segments at a soft threshold, and raises `ContextOverflow` rather than silently truncating protected task material. Interactive tool harnesses should preserve tool-call metadata and compact older tool outputs first; the included Mini-SWE-Agent weak-model config applies that policy with a 32K context window and a 2K output reserve.
 
-Evaluation is **weak-first**: the weak model is scored before the quality verifier or strong solver. If its mean score exceeds `weak_screen_max` (or it passes at least two of four scientific rollouts), the candidate is rejected as too easy and the expensive roles are not called.
+Evaluation is **quality-first, then weak-first**: structural and model-based leakage/reward checks run before any solver. If they pass, the weak model is scored before the strong solver. If its mean score exceeds `weak_screen_max` (or it passes at least two of four scientific rollouts), the candidate is rejected as too easy and the strong solver is not called.

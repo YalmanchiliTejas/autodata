@@ -26,9 +26,15 @@ class Judge:
     def complete(self, prompt, *, system=""):
         self.calls += 1
         if self.calls == 1:
-            return json.dumps({"valid": True, "weak_scores": [0.2, 0.2, 0.2], "judge_score": 0.95, "reasons": []})
-        return json.dumps({"valid": True, "weak_scores": [0.2, 0.2, 0.2], "strong_scores": [0.9, 0.9, 0.9],
-                           "judge_score": 0.95, "reasons": []})
+            return json.dumps({"valid": True, "weak_criterion_matches": [[False], [False], [False]],
+                               "judge_score": 0.95, "reasons": []})
+        if self.calls == 2:
+            return json.dumps({"valid": True, "weak_criterion_matches": [[False], [False], [False]],
+                               "strong_criterion_matches": [[True], [True], [True]],
+                               "judge_score": 0.95, "reasons": []})
+        return json.dumps({"weak_pattern": "weak missed the required result", "strong_pattern": "strong solved it",
+                           "gap_interpretation": "fertile", "rubric_concerns": [], "grpo_suitability": "high",
+                           "verdict": "accept", "verdict_reason": "useful gap", "suggestion_for_writer": ""})
 
 
 def test_builder_generates_an_accepted_math_record():
@@ -39,4 +45,4 @@ def test_builder_generates_an_accepted_math_record():
     )
     assert len(candidates) == report.accepted == 1
     assert candidates[0].accepted
-    assert candidates[0].evaluation["gap"] == 0.7
+    assert candidates[0].evaluation["gap"] == 1.0

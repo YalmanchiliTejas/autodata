@@ -77,6 +77,7 @@ def quality_verifier_prompt(spec: TaskSpec, payload: str, source_content: str | 
             "source. Fill solver_context_audit explicitly; passed must be false when solver_context_audit.passed is false. "
             "The rubric is the reward function: inspect every criterion against the source-grounded task and environment, not only its prose. "
             "Reject a candidate when any criterion awards irrelevant behavior, cannot be observed in the stated environment, duplicates another criterion, assumes an unavailable tool/data source, conflicts with the reference answer, or rewards a shortcut that bypasses the target capability. "
+            "Audit positive/negative reward overlap explicitly. Reject when failing one positive criterion also triggers a negative criterion for substantially the same mistake, because that double-counts one error. "
             "For each criterion, identify the task evidence it checks and whether it is grounded, observable, applicable in the environment, and discriminative between shallow and capable responses. "
             f"{_json_schema_contract(_quality_schema())} "
             f"Task kind: {spec.kind}\nTask profile: {spec.profile}\nEnvironment contract: {spec.environment}\n"
@@ -102,12 +103,14 @@ def solver_system_prompt(spec: TaskSpec) -> str:
             "Make a sincere best-effort solution, check constraints and edge cases, and return a concise conclusion with essential justification.")
 
 
-def rubric_scoring_prompt(spec: TaskSpec, judge_task: str, weak_answers: list[str], strong_answers: list[str], *, weak_only: bool = False) -> str:
+def rubric_scoring_prompt(spec: TaskSpec, judge_task: str, weak_answers: list[str], strong_answers: list[str],
+                          rubric: list[dict], *, weak_only: bool = False) -> str:
     return ("You are a strict, independent rubric evaluator. You receive the solver-visible task, its rubric, and solver responses; you do not receive a reference answer. "
             "Score each rubric criterion independently and binary: award credit only when the response completely and unambiguously satisfies the criterion. For negative criteria, award a match only when the response actually exhibits the specified error, then apply its negative weight. "
-            "Do not infer missing reasoning, reward style, or use knowledge outside the solver-visible task and declared environment. Normalize each response score by the rubric's attainable range. "
+            "Do not infer missing reasoning, reward style, or use knowledge outside the solver-visible task and declared environment. "
+            "Return one boolean per rubric criterion for every response, in the exact rubric order. For a positive criterion, true means the required behavior is present. For a negative criterion, true means the specified error is present. Do not calculate aggregate or normalized scores; the caller does that deterministically. "
             f"Task profile: {spec.profile}\nEvaluation package: {judge_task}\nWeak answers: {weak_answers}\nStrong answers: {strong_answers}\n"
-            f"{_json_schema_contract(_score_schema(len(weak_answers), None if weak_only else len(strong_answers)))} "
+            f"{_json_schema_contract(_score_schema(len(weak_answers), None if weak_only else len(strong_answers), len(rubric)))} "
             "Set valid=false if the rubric cannot be applied from the package.")
 
 
@@ -136,15 +139,17 @@ def _json_schema_contract(schema: dict) -> str:
             + json.dumps(schema, separators=(",", ":")))
 
 
-def _score_schema(weak_count: int, strong_count: int | None) -> dict:
-    properties = {"valid": {"type": "boolean"}, "weak_scores": {"type": "array", "minItems": weak_count,
-                  "maxItems": weak_count, "items": {"type": "number", "minimum": 0, "maximum": 1}},
+def _score_schema(weak_count: int, strong_count: int | None, rubric_count: int) -> dict:
+    rollout_matches = {"type": "array", "minItems": rubric_count, "maxItems": rubric_count,
+                       "items": {"type": "boolean"}}
+    properties = {"valid": {"type": "boolean"}, "weak_criterion_matches": {"type": "array", "minItems": weak_count,
+                  "maxItems": weak_count, "items": rollout_matches},
                   "judge_score": {"type": "number", "minimum": 0, "maximum": 1}, "reasons": {"type": "array", "items": {"type": "string"}}}
     required = list(properties)
     if strong_count is not None:
-        properties["strong_scores"] = {"type": "array", "minItems": strong_count, "maxItems": strong_count,
-                                       "items": {"type": "number", "minimum": 0, "maximum": 1}}
-        required.append("strong_scores")
+        properties["strong_criterion_matches"] = {"type": "array", "minItems": strong_count,
+                                                   "maxItems": strong_count, "items": rollout_matches}
+        required.append("strong_criterion_matches")
     return {"type": "object", "properties": properties, "required": required}
 
 
@@ -163,11 +168,20 @@ def _quality_schema() -> dict:
         "evidence": {"type": "string"},
     }, "required": ["grounded", "observable", "environment_compatible", "discriminative", "evidence"],
         "additionalProperties": False}
+    overlap_pair = {"type": "object", "properties": {
+        "positive_index": {"type": "integer", "minimum": 1},
+        "negative_index": {"type": "integer", "minimum": 1},
+        "evidence": {"type": "string"},
+    }, "required": ["positive_index", "negative_index", "evidence"], "additionalProperties": False}
+    overlap_audit = {"type": "object", "properties": {
+        "passed": {"type": "boolean"}, "overlapping_pairs": {"type": "array", "items": overlap_pair},
+    }, "required": ["passed", "overlapping_pairs"], "additionalProperties": False}
     return {"type": "object", "properties": {"passed": {"type": "boolean"}, "checks": {"type": "object"},
             "solver_context_audit": context_audit,
+            "reward_overlap_audit": overlap_audit,
             "criterion_audit": {"type": "array", "items": criterion_row}, "intrinsic_reward_eligible": {"type": "boolean"},
             "issues": {"type": "array", "items": {"type": "string"}}, "feedback": {"type": "string"}},
-            "required": ["passed", "checks", "solver_context_audit", "criterion_audit",
+            "required": ["passed", "checks", "solver_context_audit", "reward_overlap_audit", "criterion_audit",
                          "intrinsic_reward_eligible", "issues", "feedback"]}
 
 

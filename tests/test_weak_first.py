@@ -18,10 +18,11 @@ class Model:
 class Judge(Model):
     def complete(self, prompt, *, system=""):
         self.calls += 1
-        return json.dumps({"valid": True, "weak_scores": [0.95, 0.95], "judge_score": 1.0, "reasons": []})
+        return json.dumps({"valid": True, "weak_criterion_matches": [[True], [True]],
+                           "judge_score": 1.0, "reasons": []})
 
 
-def _quality_response(*, context_passed=True, passed=True):
+def _quality_response(*, context_passed=True, overlap_passed=True, passed=True, criterion_count=1):
     return json.dumps({
         "passed": passed,
         "checks": {},
@@ -30,8 +31,15 @@ def _quality_response(*, context_passed=True, passed=True):
             "leakage_types": [] if context_passed else ["tool_or_library_hint"],
             "evidence": [] if context_passed else ["starter code imports the intended solution library"],
         },
+        "reward_overlap_audit": {
+            "passed": overlap_passed,
+            "overlapping_pairs": [] if overlap_passed else [
+                {"positive_index": 1, "negative_index": 2, "evidence": "same behavior rewarded twice"}
+            ],
+        },
         "criterion_audit": [{"grounded": True, "observable": True, "environment_compatible": True,
-                             "discriminative": True, "evidence": "checks the required result"}],
+                             "discriminative": True, "evidence": "checks the required result"}
+                            for _ in range(criterion_count)],
         "intrinsic_reward_eligible": True,
         "issues": [],
         "feedback": "",
@@ -66,6 +74,27 @@ def test_solver_context_leakage_is_rejected_before_any_solver_call():
     assert weak.calls == strong.calls == judge.calls == 0
     assert verifier.calls == 1
     assert "solver-context leakage" in result.reasons[0]
+    assert result.quality_verifier["solver_context_audit"]["passed"] is False
+
+
+def test_overlapping_positive_negative_rewards_are_rejected_before_solvers():
+    weak, strong, judge = Model(), Model(), Judge()
+    verifier = Model(_quality_response(overlap_passed=False, passed=False, criterion_count=2))
+    evaluator = CandidateEvaluator(weak, strong, judge, quality_verifier=verifier, weak_rollouts=2)
+    candidate = Candidate("c", "t", "s", {
+        "question": "q", "answer": "a",
+        "rubric": [
+            {"criterion": "required behavior", "weight": 1, "category": "positive"},
+            {"criterion": "same missing behavior", "weight": -1, "category": "negative"},
+        ],
+    })
+
+    result = evaluator.evaluate(TaskSpec("t", "qa", "x"), candidate)
+
+    assert not result.valid
+    assert weak.calls == strong.calls == judge.calls == 0
+    assert "double-counts one error" in result.reasons[0]
+    assert result.quality_verifier["reward_overlap_audit"]["passed"] is False
 
 
 class ChallengerOrchestrator(Model):
@@ -116,7 +145,7 @@ def test_coding_orchestrator_rejects_conceptual_qa_strategy():
 class InvalidJudge(Model):
     def complete(self, prompt, *, system=""):
         self.calls += 1
-        return json.dumps({"valid": True, "weak_scores": [], "judge_score": 1.0, "reasons": []})
+        return json.dumps({"valid": True, "weak_criterion_matches": [], "judge_score": 1.0, "reasons": []})
 
 
 def test_infrastructure_failure_skips_challenger_orchestration():

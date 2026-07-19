@@ -24,10 +24,13 @@ class Judge:
         self.calls += 1
         self.prompts.append(prompt)
         if self.calls == 1:
-            return json.dumps({"valid": True, "weak_scores": [0.1], "judge_score": 1, "reasons": []})
+            return json.dumps({"valid": True, "weak_criterion_matches": [[False]], "judge_score": 1, "reasons": []})
         if self.calls == 2:
-            return json.dumps({"valid": True, "weak_scores": [0.1], "strong_scores": [0.9], "judge_score": 1, "reasons": []})
-        return json.dumps({"verdict": "accept", "rubric_concerns": []})
+            return json.dumps({"valid": True, "weak_criterion_matches": [[False]],
+                               "strong_criterion_matches": [[True]], "judge_score": 1, "reasons": []})
+        return json.dumps({"weak_pattern": "weak missed", "strong_pattern": "strong passed",
+                           "gap_interpretation": "fertile", "rubric_concerns": [], "grpo_suitability": "high",
+                           "verdict": "accept", "verdict_reason": "good", "suggestion_for_writer": ""})
 
 
 def test_solvers_never_receive_challenger_reference_or_rubric():

@@ -4,6 +4,7 @@
   "output": "outputs/oauthlib-python-candidates.jsonl",
   "report": "outputs/oauthlib-python-report.json",
   "solver_prompt_log": "outputs/oauthlib-python-solver-prompts.log",
+  "checkpoint": "outputs/oauthlib-python-checkpoint.json",
   "rounds": 3,
   "stop_after_accept_per_source": true,
   "models": {

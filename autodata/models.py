@@ -67,6 +67,7 @@ class Evaluation:
     verdict: str = "improve"
     suggestion_for_writer: str | None = None
     failure_kind: str | None = None
+    quality_verifier: dict[str, Any] | None = None
 
     @property
     def gap(self) -> float | None:
@@ -79,7 +80,7 @@ class Evaluation:
                 "judge_score": self.judge_score, "gap": self.gap, "reasons": self.reasons,
                 "weak_rollouts": self.weak_rollouts, "strong_rollouts": self.strong_rollouts,
                 "verdict": self.verdict, "suggestion_for_writer": self.suggestion_for_writer,
-                "failure_kind": self.failure_kind}
+                "failure_kind": self.failure_kind, "quality_verifier": self.quality_verifier}
 
 
 @dataclass(slots=True)

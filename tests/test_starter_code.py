@@ -34,3 +34,10 @@ def test_starter_code_rejects_partial_implementation_logic():
     candidate = _candidate("def solve(value):\n    encoded = value.encode()\n    return encoded")
     issues = ADAPTERS["coding"].validate(candidate)
     assert any("function bodies must contain only" in issue for issue in issues)
+
+
+def test_coding_prompt_rejects_worked_examples_section():
+    candidate = _candidate("def solve(value):\n    ...")
+    candidate.payload["prompt"] = "Implement solve.\n\n## Examples\nsolve(1)  # => 1"
+    issues = ADAPTERS["coding"].validate(candidate)
+    assert any("must not include a worked Examples section" in issue for issue in issues)

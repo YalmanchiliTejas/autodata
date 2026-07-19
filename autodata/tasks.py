@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -88,19 +89,20 @@ class CodingAdapter(TaskAdapter):
         tests = candidate.payload.get("tests")
         generic_issues = self._generic_validation(candidate)
         starter_issues = _starter_code_issues(candidate.payload.get("starter_code"))
+        prompt_issues = _coding_prompt_issues(candidate.payload.get("prompt"))
         if not isinstance(tests, list) or not tests:
-            return generic_issues + starter_issues + ["coding task needs a non-empty tests array"]
+            return generic_issues + starter_issues + prompt_issues + ["coding task needs a non-empty tests array"]
         malformed = [str(index) for index, test in enumerate(tests)
                      if not isinstance(test, dict) or not isinstance(test.get("name"), str)
                      or not isinstance(test.get("code"), str)]
         if malformed:
-            return generic_issues + starter_issues + [f"coding tests must be objects with string name and code: {', '.join(malformed)}"]
+            return generic_issues + starter_issues + prompt_issues + [f"coding tests must be objects with string name and code: {', '.join(malformed)}"]
         reference = candidate.payload.get("reference_solution", "").strip()
         copied_reference = [test["name"] for test in tests if reference and reference in test["code"]]
         if copied_reference:
-            return generic_issues + starter_issues + ["coding tests must call the submitted API, not embed the reference solution: "
-                                                      + ", ".join(copied_reference)]
-        return generic_issues + starter_issues + self._rubric_validation(candidate)
+            return generic_issues + starter_issues + prompt_issues + ["coding tests must call the submitted API, not embed the reference solution: "
+                                                                      + ", ".join(copied_reference)]
+        return generic_issues + starter_issues + prompt_issues + self._rubric_validation(candidate)
 
 
 class CustomAdapter(TaskAdapter):
@@ -209,6 +211,15 @@ def _starter_code_issues(starter_code: object) -> list[str]:
             issues.append("coding starter_code function bodies must contain only a docstring and pass, ..., or raise NotImplementedError")
             break
     return issues
+
+
+def _coding_prompt_issues(prompt: object) -> list[str]:
+    """Keep worked input/output demonstrations in hidden tests, not solver context."""
+    if not isinstance(prompt, str):
+        return []
+    if re.search(r"(?im)^#{0,3}\s*(examples?|worked examples?)\s*:?.*$", prompt):
+        return ["coding prompt must not include a worked Examples section; keep concrete cases and outputs in hidden tests"]
+    return []
 
 
 def _output_contract(spec: TaskSpec) -> str:

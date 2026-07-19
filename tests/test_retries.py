@@ -28,8 +28,20 @@ class Solver:
 
 
 class Judge:
+    def __init__(self):
+        self.calls = 0
+
     def complete(self, prompt, *, system=""):
-        return json.dumps({"valid": True, "weak_scores": [0.2], "strong_scores": [0.9], "judge_score": 0.9, "reasons": []})
+        self.calls += 1
+        if self.calls % 3 == 1:
+            return json.dumps({"valid": True, "weak_criterion_matches": [[False]],
+                               "judge_score": 0.9, "reasons": []})
+        if self.calls % 3 == 2:
+            return json.dumps({"valid": True, "weak_criterion_matches": [[False]],
+                               "strong_criterion_matches": [[True]], "judge_score": 0.9, "reasons": []})
+        return json.dumps({"weak_pattern": "weak missed", "strong_pattern": "strong passed",
+                           "gap_interpretation": "fertile", "rubric_concerns": [], "grpo_suitability": "high",
+                           "verdict": "accept", "verdict_reason": "good", "suggestion_for_writer": ""})
 
 
 def test_retries_rejected_source_then_stops_after_acceptance():
@@ -102,3 +114,36 @@ def test_feedback_does_not_leak_into_the_next_source_chunk():
     assert "No prior feedback" in generator.prompts[0]
     assert "No prior feedback" in generator.prompts[1]
     assert "RL-oriented task requires" not in generator.prompts[1]
+
+
+def test_checkpoint_resume_skips_terminal_attempts_and_preserves_audit(tmp_path):
+    class AlwaysInvalidGenerator:
+        def __init__(self):
+            self.calls = 0
+
+        def complete(self, prompt, *, system=""):
+            self.calls += 1
+            return json.dumps({"problem": "x", "answer": "x", "solution": "x", "verification": "x"})
+
+    checkpoint = tmp_path / "run.checkpoint.json"
+    spec = TaskSpec("math", "math", "x", environment={"success_conditions": ["x"]}, max_rounds=1)
+    first_generator = AlwaysInvalidGenerator()
+    first = DatasetBuilder(first_generator, CandidateEvaluator(Solver(), Solver(), Judge()),
+                           checkpoint_path=checkpoint)
+    first.build([spec], [SourceDocument("s1", "first")], rounds_per_source=1)
+    assert first_generator.calls == 1
+    assert checkpoint.exists()
+
+    second_generator = AlwaysInvalidGenerator()
+    resumed = DatasetBuilder(second_generator, CandidateEvaluator(Solver(), Solver(), Judge()),
+                             checkpoint_path=checkpoint, resume=True)
+    _, report = resumed.build(
+        [spec], [SourceDocument("s1", "first"), SourceDocument("s2", "second")], rounds_per_source=1)
+
+    assert second_generator.calls == 1  # s1 was terminal; only the new s2 source ran
+    rejected = [event for event in resumed.audit_events if event["status"] == "rejected_structure"]
+    assert {(event["source_id"], event["attempt"]) for event in rejected} == {("s1", 1), ("s2", 1)}
+    assert report.attempted == 2
+    state = json.loads(checkpoint.read_text())
+    assert state["complete"] is True
+    assert len(state["last_attempts"]) == 2

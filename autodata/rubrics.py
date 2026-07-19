@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 
 
-GENERIC_CRITERIA = ("is correct", "is helpful", "is clear", "provides a good", "uses a structured")
+GENERIC_CRITERIA = {"is correct", "is helpful", "is clear", "provides a good answer", "uses a structured response"}
 
 
 def _terms(text: str) -> set[str]:
@@ -30,7 +30,7 @@ def validate_rubric(payload: dict, capabilities: list[str], environment: dict) -
             continue
         criterion = item["criterion"].strip()
         texts.append(criterion)
-        if len(criterion) < 12 or any(phrase in criterion.lower() for phrase in GENERIC_CRITERIA):
+        if len(criterion) < 12 or criterion.lower().rstrip(".") in GENERIC_CRITERIA:
             issues.append(f"rubric item {index} is not an observable task-specific check")
         if ("weight" not in item or isinstance(item.get("weight"), bool)
                 or not isinstance(item.get("weight"), int) or item["weight"] == 0):
@@ -40,7 +40,9 @@ def validate_rubric(payload: dict, capabilities: list[str], environment: dict) -
     for left in range(len(texts)):
         for right in range(left):
             a, b = _terms(texts[left]), _terms(texts[right])
-            if a and b and len(a & b) / len(a | b) >= 0.80:
+            # Only catch effectively identical local duplicates. Semantic
+            # overlap belongs to the source-aware quality verifier.
+            if a and b and len(a & b) / len(a | b) >= 0.97:
                 issues.append(f"rubric criteria {right} and {left} are near-duplicates")
     tagged = {item.get("capability") for item in rubric if isinstance(item, dict)}
     missing = [capability for capability in capabilities if capability not in tagged]

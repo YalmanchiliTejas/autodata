@@ -57,7 +57,8 @@ class CandidateEvaluator:
         # The scoring judge needs the rubric but, following the CS setup in the
         # paper, does not get the challenger reference answer.
         judge_payload = dict(solver_payload)
-        judge_payload["rubric"] = candidate.payload.get("rubric", [])
+        rubric = candidate.payload.get("rubric", [])
+        judge_payload["rubric"] = rubric
         judge_task = json.dumps(judge_payload, ensure_ascii=False)
         weak_runs = 4 if spec.profile == "scientific_reasoning" else self.weak_rollouts
         strong_runs = 4 if spec.profile == "scientific_reasoning" else self.strong_rollouts
@@ -70,7 +71,7 @@ class CandidateEvaluator:
                 expected_criteria = len(candidate.payload.get("rubric", []))
                 logger.info("candidate=%s stage=quality_verifier_start order=pre_solver expected_criteria=%s",
                             candidate.id, expected_criteria)
-                required_fields = {"passed", "checks", "solver_context_audit", "criterion_audit",
+                required_fields = {"passed", "checks", "solver_context_audit", "reward_overlap_audit", "criterion_audit",
                                    "intrinsic_reward_eligible", "issues", "feedback"}
                 verifier_prompt = quality_verifier_prompt(spec, task, source_content)
                 quality = None
@@ -80,7 +81,7 @@ class CandidateEvaluator:
                     try:
                         quality = extract_json_object(
                             raw_quality, required_fields, producer="quality-verifier",
-                            validator=lambda value: _quality_response_contract(value, expected_criteria),
+                            validator=lambda value: _quality_response_contract(value, rubric),
                         )
                         break
                     except (ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
@@ -92,10 +93,13 @@ class CandidateEvaluator:
                     assert last_quality_error is not None
                     raise last_quality_error
                 context_audit = quality["solver_context_audit"]
+                overlap_audit = quality["reward_overlap_audit"]
                 logger.info("candidate=%s stage=quality_verifier_complete passed=%s context_passed=%s "
-                            "intrinsic_reward_eligible=%s audit_items=%s expected_criteria=%s seconds=%.1f",
+                            "reward_overlap_passed=%s intrinsic_reward_eligible=%s audit_items=%s "
+                            "expected_criteria=%s seconds=%.1f",
                             candidate.id, quality["passed"], context_audit["passed"],
-                            quality["intrinsic_reward_eligible"], len(quality["criterion_audit"]),
+                            overlap_audit["passed"], quality["intrinsic_reward_eligible"],
+                            len(quality["criterion_audit"]),
                             expected_criteria, perf_counter() - started)
                 if not context_audit["passed"]:
                     leakage = ", ".join(context_audit["leakage_types"]) or "unspecified"
@@ -107,7 +111,22 @@ class CandidateEvaluator:
                     logger.info("candidate=%s stage=evaluation_stopped reason=solver_context_leakage types=%s",
                                 candidate.id, leakage)
                     return Evaluation(False, None, None, 0.0,
-                                      reasons or [f"solver-context leakage detected: {leakage}"])
+                                      reasons or [f"solver-context leakage detected: {leakage}"],
+                                      quality_verifier=quality)
+                if not overlap_audit["passed"]:
+                    reasons = [
+                        f"rubric double-counts one error in positive criterion {pair['positive_index']} and "
+                        f"negative criterion {pair['negative_index']}: {pair['evidence']}"
+                        for pair in overlap_audit["overlapping_pairs"]
+                    ]
+                    reasons.extend(quality["issues"])
+                    if quality["feedback"]:
+                        reasons.append(quality["feedback"])
+                    logger.info("candidate=%s stage=evaluation_stopped reason=reward_overlap pairs=%s",
+                                candidate.id, len(overlap_audit["overlapping_pairs"]))
+                    return Evaluation(False, None, None, 0.0,
+                                      reasons or ["quality verifier rejected overlapping positive/negative rewards"],
+                                      quality_verifier=quality)
                 if not quality["passed"]:
                     reasons = list(quality["issues"])
                     if quality["feedback"]:
@@ -115,7 +134,7 @@ class CandidateEvaluator:
                     logger.info("candidate=%s stage=evaluation_stopped reason=quality_verifier_rejected",
                                 candidate.id)
                     return Evaluation(False, None, None, 0.0,
-                                      reasons or ["quality verification failed"])
+                                      reasons or ["quality verification failed"], quality_verifier=quality)
                 if expected_criteria:
                     required = ("grounded", "observable", "environment_compatible", "discriminative")
                     rubric_failures = []
@@ -133,11 +152,12 @@ class CandidateEvaluator:
                             reasons.append(quality["feedback"])
                         logger.info("candidate=%s stage=evaluation_stopped reason=rubric_intrinsic_ineligible "
                                     "failed_criteria=%s", candidate.id, len(rubric_failures))
-                        return Evaluation(False, None, None, 0.0, reasons)
+                        return Evaluation(False, None, None, 0.0, reasons, quality_verifier=quality)
             except (ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
                 logger.warning("candidate=%s stage=quality_verifier_invalid error=%s", candidate.id, exc)
                 return Evaluation(False, None, None, 0.0, [f"invalid quality-verifier response: {exc}"],
-                                  failure_kind="infrastructure")
+                                  failure_kind="infrastructure",
+                                  quality_verifier={"contract_error": str(exc)})
 
         # A task the weak solver handles easily cannot provide useful training
         # signal, so the weak screen remains the compute gate for strong runs.
@@ -149,11 +169,12 @@ class CandidateEvaluator:
         try:
             started = perf_counter()
             weak_result = self._score_judge(
-                rubric_scoring_prompt(spec, judge_task, weak_answers, [], weak_only=True),
-                "weak-screen", weak_runs, candidate_id=candidate.id)
-            weak_scores = _score_response(weak_result, "weak-screen", weak_runs)
+                rubric_scoring_prompt(spec, judge_task, weak_answers, [], rubric, weak_only=True),
+                "weak-screen", weak_runs, rubric, candidate_id=candidate.id)
+            weak_scores = _criterion_scores(weak_result, "weak-screen", weak_runs, rubric)
             weak_eval = Evaluation(weak_result["valid"], mean(weak_scores), None,
-                                   weak_result["judge_score"], weak_result["reasons"], weak_scores, [])
+                                   weak_result["judge_score"], weak_result["reasons"], weak_scores, [],
+                                   quality_verifier=quality if self.quality_verifier else None)
         except (ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
             logger.warning("candidate=%s stage=weak_screen_invalid error=%s", candidate.id, exc)
             return Evaluation(False, None, None, 0.0, [f"invalid weak-screen judge response: {exc}"],
@@ -173,15 +194,18 @@ class CandidateEvaluator:
             self.strong, spec, candidate, "strong", strong_runs, matched_solver_prompt, solver_payload, solver_task)
         logger.info("candidate=%s stage=strong_rollouts_complete count=%s seconds=%.1f",
                     candidate.id, strong_runs, perf_counter() - started)
-        prompt = rubric_scoring_prompt(spec, judge_task, weak_answers, strong_answers)
+        prompt = rubric_scoring_prompt(spec, judge_task, weak_answers, strong_answers, rubric)
         try:
             started = perf_counter()
-            result = self._score_judge(prompt, "final judge", weak_runs, strong_runs, candidate_id=candidate.id)
-            weak_scores = _score_response(result, "final judge", weak_runs)
-            strong_scores = _score_response(result, "final judge", strong_runs, field="strong_scores")
+            result = self._score_judge(prompt, "final judge", weak_runs, rubric, strong_runs,
+                                       candidate_id=candidate.id)
+            weak_scores = _criterion_scores(result, "final judge", weak_runs, rubric)
+            strong_scores = _criterion_scores(result, "final judge", strong_runs, rubric,
+                                               field="strong_criterion_matches")
             evaluation = Evaluation(result["valid"], mean(weak_scores), mean(strong_scores),
                                     result["judge_score"], result["reasons"],
-                                    weak_scores, strong_scores)
+                                    weak_scores, strong_scores,
+                                    quality_verifier=quality if self.quality_verifier else None)
         except (ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
             logger.warning("candidate=%s stage=final_judge_invalid error=%s", candidate.id, exc)
             return Evaluation(False, None, None, 0.0, [f"invalid judge response: {exc}"],
@@ -205,9 +229,11 @@ class CandidateEvaluator:
                 evaluation.reasons.append(verdict.get("verdict_reason", "loop judge requested improvement"))
             logger.info("candidate=%s stage=loop_judge_complete verdict=%s seconds=%.1f",
                         candidate.id, evaluation.verdict, perf_counter() - started)
-        except (ValueError, TypeError, json.JSONDecodeError):
-            # Generic judges may only support scoring. The deterministic gates remain safe.
-            pass
+        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+            logger.warning("candidate=%s stage=loop_judge_invalid error=%s", candidate.id, exc)
+            evaluation.valid = False
+            evaluation.failure_kind = "infrastructure"
+            evaluation.reasons.append(f"invalid loop-judge response: {exc}")
         if evaluation.strong_score < self.min_strong:
             evaluation.reasons.append("strong solver could not reliably solve it")
         if evaluation.gap is not None and evaluation.gap < self.min_gap and spec.target_difficulty == "adaptive":
@@ -216,17 +242,17 @@ class CandidateEvaluator:
             evaluation.reasons.append("judge found task quality too low")
         return evaluation
 
-    def _score_judge(self, prompt: str, stage: str, weak_count: int,
+    def _score_judge(self, prompt: str, stage: str, weak_count: int, rubric: list[dict],
                      strong_count: int | None = None, *, candidate_id: str) -> dict:
         """Retry malformed judge output and select an object satisfying the full score contract."""
-        required = {"valid", "weak_scores", "judge_score", "reasons"}
+        required = {"valid", "weak_criterion_matches", "judge_score", "reasons"}
         if strong_count is not None:
-            required.add("strong_scores")
+            required.add("strong_criterion_matches")
 
         def validate(payload: dict) -> None:
-            _score_response(payload, stage, weak_count)
+            _criterion_scores(payload, stage, weak_count, rubric)
             if strong_count is not None:
-                _score_response(payload, stage, strong_count, field="strong_scores")
+                _criterion_scores(payload, stage, strong_count, rubric, field="strong_criterion_matches")
 
         last_error: ValueError | None = None
         for retry in range(self.contract_retries + 1):
@@ -265,7 +291,7 @@ class CandidateEvaluator:
     def accepts(self, spec: TaskSpec, evaluation: Evaluation) -> bool:
         if not evaluation.valid or evaluation.judge_score < self.min_judge:
             return False
-        if spec.profile == "legal_reasoning" and evaluation.verdict != "accept":
+        if evaluation.verdict != "accept":
             return False
         if spec.profile == "cs_research":
             return (evaluation.strong_score is not None and evaluation.weak_score is not None
@@ -298,25 +324,44 @@ def _object_contract(payload: dict, stage: str, expected: dict[str, type]) -> No
         raise ValueError(f"{stage} response contract violation ({'; '.join(details)})")
 
 
-def _score_response(payload: dict, stage: str, expected_count: int, *, field: str = "weak_scores") -> list[float]:
-    expected = {"valid": bool, "weak_scores": list, "judge_score": (int, float), "reasons": list}
-    if field == "strong_scores":
-        expected["strong_scores"] = list
+def _criterion_scores(payload: dict, stage: str, expected_count: int, rubric: list[dict],
+                      *, field: str = "weak_criterion_matches") -> list[float]:
+    expected = {"valid": bool, "weak_criterion_matches": list, "judge_score": (int, float), "reasons": list}
+    if field == "strong_criterion_matches":
+        expected["strong_criterion_matches"] = list
     _object_contract(payload, stage, expected)
-    scores = payload[field]
-    if len(scores) != expected_count or any(isinstance(score, bool) or not isinstance(score, (int, float)) or not 0 <= score <= 1 for score in scores):
-        raise ValueError(f"{stage} response contract violation ({field} must contain {expected_count} numeric scores in [0, 1])")
+    matches = payload[field]
+    if (len(matches) != expected_count
+            or any(not isinstance(row, list) or len(row) != len(rubric)
+                   or any(not isinstance(value, bool) for value in row) for row in matches)):
+        raise ValueError(
+            f"{stage} response contract violation ({field} must contain {expected_count} rows of "
+            f"{len(rubric)} booleans)"
+        )
     if not 0 <= payload["judge_score"] <= 1:
         raise ValueError(f"{stage} response contract violation (judge_score must be in [0, 1])")
     if any(not isinstance(reason, str) for reason in payload["reasons"]):
         raise ValueError(f"{stage} response contract violation (reasons must be an array of strings)")
-    return [float(score) for score in scores]
+    positive = [abs(int(item["weight"])) if item.get("category") != "negative" else 0 for item in rubric]
+    negative = [-abs(int(item["weight"])) if item.get("category") == "negative" else 0 for item in rubric]
+    maximum, minimum = sum(positive), sum(negative)
+    span = maximum - minimum
+    if span <= 0:
+        raise ValueError(f"{stage} response contract violation (rubric has no attainable reward range)")
+    scores = []
+    for row in matches:
+        raw = sum((positive[index] if matched else 0) + (negative[index] if matched else 0)
+                  for index, matched in enumerate(row))
+        scores.append((raw - minimum) / span)
+    return scores
 
 
-def _quality_response_contract(payload: dict, expected_criteria: int) -> None:
+def _quality_response_contract(payload: dict, rubric: list[dict]) -> None:
     """Validate the complete pre-solver quality response, including every rubric row."""
+    expected_criteria = len(rubric)
     _object_contract(payload, "quality-verifier", {
-        "passed": bool, "checks": dict, "solver_context_audit": dict, "criterion_audit": list,
+        "passed": bool, "checks": dict, "solver_context_audit": dict, "reward_overlap_audit": dict,
+        "criterion_audit": list,
         "intrinsic_reward_eligible": bool, "issues": list, "feedback": str,
     })
     context = payload["solver_context_audit"]
@@ -333,6 +378,24 @@ def _quality_response_contract(payload: dict, expected_criteria: int) -> None:
         raise ValueError("quality-verifier solver_context_audit evidence must be an array of strings")
     if any(not isinstance(item, str) for item in payload["issues"]):
         raise ValueError("quality-verifier issues must be an array of strings")
+    overlap = payload["reward_overlap_audit"]
+    _object_contract(overlap, "quality-verifier reward_overlap_audit", {
+        "passed": bool, "overlapping_pairs": list,
+    })
+    for index, pair in enumerate(overlap["overlapping_pairs"], start=1):
+        if not isinstance(pair, dict):
+            raise ValueError(f"quality-verifier reward_overlap_audit pair {index} must be an object")
+        _object_contract(pair, f"quality-verifier reward_overlap_audit pair {index}", {
+            "positive_index": int, "negative_index": int, "evidence": str,
+        })
+        if isinstance(pair["positive_index"], bool) or isinstance(pair["negative_index"], bool):
+            raise ValueError(f"quality-verifier reward_overlap_audit pair {index} indexes must be integers")
+        if not 1 <= pair["positive_index"] <= expected_criteria or not 1 <= pair["negative_index"] <= expected_criteria:
+            raise ValueError(f"quality-verifier reward_overlap_audit pair {index} has an out-of-range criterion index")
+        if rubric[pair["positive_index"] - 1].get("category") == "negative":
+            raise ValueError(f"quality-verifier reward_overlap_audit pair {index} positive_index is not positive")
+        if rubric[pair["negative_index"] - 1].get("category") != "negative":
+            raise ValueError(f"quality-verifier reward_overlap_audit pair {index} negative_index is not negative")
     audit = payload["criterion_audit"]
     if len(audit) != expected_criteria:
         raise ValueError(
