@@ -55,11 +55,55 @@ class TaskAdapter(ABC):
                 return ["generic task requires a self_audit object"]
             if set(audit) != expected or not all(audit.values()):
                 return ["generic self_audit must contain all required checks and every check must be true"]
-            serialized = json.dumps(candidate.payload).lower()
-            blocked = [term for term in candidate.provenance.get("forbidden_content", []) if term.lower() in serialized]
+            blocked = [
+                term for term in candidate.provenance.get("forbidden_content", [])
+                if _contains_prohibited_feature(candidate.payload, term)
+            ]
             if blocked:
                 return [f"generic task contains prohibited content or feature: {', '.join(blocked)}"]
         return []
+
+
+def _contains_prohibited_feature(value: object, term: str) -> bool:
+    """Find affirmative use of a forbidden feature without rejecting safety rules.
+
+    Challenger output often repeats constraints such as ``no network access``.
+    A raw substring search treated that prohibition as a request for the very
+    feature it forbids. Inspect individual strings instead, and ignore common
+    explicit negations around the configured phrase.
+    """
+    if isinstance(value, dict):
+        return any(_contains_prohibited_feature(item, term) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_contains_prohibited_feature(item, term) for item in value)
+    if not isinstance(value, str) or not term.strip():
+        return False
+
+    escaped = re.escape(term.strip())
+    occurrence = re.compile(escaped, re.IGNORECASE)
+    for match in occurrence.finditer(value):
+        before = value[max(0, match.start() - 100):match.start()]
+        after = value[match.end():match.end() + 60]
+        prefix_negation = re.search(
+            r"(?:"
+            r"\bno\s+(?:(?:use|need|requirement|dependency)\s+(?:of|for|on)\s+)?|"
+            r"\bwithout\s+|"
+            r"\b(?:do|does|must|should|shall|may|can)\s+not\s+"
+            r"(?:(?:use|require|allow|permit|request|need)\s+|depend\s+on\s+)?|"
+            r"\bnever\s+(?:(?:use|require|allow|permit|request|need)\s+|depend\s+on\s+)?"
+            r")$",
+            before,
+            re.IGNORECASE,
+        )
+        suffix_negation = re.match(
+            r"\s+(?:is|must\s+be|should\s+be)\s+"
+            r"(?:prohibited|forbidden|disabled|unavailable|not\s+(?:allowed|permitted|required))\b",
+            after,
+            re.IGNORECASE,
+        )
+        if not prefix_negation and not suffix_negation:
+            return True
+    return False
 
 
 class QuestionAnswerAdapter(TaskAdapter):

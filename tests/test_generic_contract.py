@@ -1,4 +1,4 @@
-from autodata.models import SourceDocument, TaskSpec
+from autodata.models import Candidate, SourceDocument, TaskSpec
 from autodata.tasks import ADAPTERS
 
 
@@ -26,3 +26,55 @@ def test_generic_tasks_fail_without_a_clean_audit():
     spec = TaskSpec("generic", "custom", "Create a task")
     candidate = ADAPTERS["custom"].parse('{"input":"x", "answer":"y"}', spec, SourceDocument("s", "x"), "c")
     assert "generic task requires a self_audit object" in ADAPTERS["custom"].validate(candidate)
+
+
+def _candidate_with_prompt(prompt: str) -> Candidate:
+    return Candidate(
+        "candidate",
+        "code",
+        "source",
+        {
+            "prompt": prompt,
+            "reference_solution": "def solve():\n    return None",
+            "tests": [{"name": "smoke", "code": "assert solve() is None"}],
+            "self_audit": {
+                "grounded": True,
+                "within_scope": True,
+                "no_answer_leakage": True,
+                "fairness_checked": True,
+                "verifiable": True,
+            },
+        },
+        provenance={
+            "profile": "generic",
+            "forbidden_content": ["network access"],
+            "environment": {},
+            "require_rubric": False,
+        },
+    )
+
+
+def test_forbidden_content_allows_an_explicit_safety_prohibition():
+    candidate = _candidate_with_prompt(
+        "Use only local inputs. No network access or external services are allowed."
+    )
+
+    assert not any("prohibited content" in issue for issue in ADAPTERS["coding"].validate(candidate))
+
+
+def test_forbidden_content_rejects_affirmative_feature_use():
+    candidate = _candidate_with_prompt(
+        "Use network access to download the current token metadata."
+    )
+
+    assert "generic task contains prohibited content or feature: network access" in ADAPTERS["coding"].validate(candidate)
+
+
+def test_forbidden_content_allows_must_not_and_suffix_prohibitions():
+    for prompt in (
+        "The implementation must not use network access.",
+        "Network access is prohibited in the execution environment.",
+        "Complete the task without network access.",
+    ):
+        candidate = _candidate_with_prompt(prompt)
+        assert not any("prohibited content" in issue for issue in ADAPTERS["coding"].validate(candidate))
